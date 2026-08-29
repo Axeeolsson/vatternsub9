@@ -218,7 +218,7 @@ export function LogSessionForm({ date, planned, existing, onSaved }: Props) {
       )}
 
       {/* Date + title */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
         <div>
           <label className="label">Datum</label>
           <input

@@ -42,7 +42,7 @@ body {
     @apply btn bg-white/5 text-slate-200 hover:bg-white/10;
   }
   .input {
-    @apply w-full rounded-xl bg-ink-800 border border-white/10 px-3 py-3 text-slate-100 placeholder:text-slate-500 focus:border-brand focus:outline-none;
+    @apply w-full min-w-0 rounded-xl bg-ink-800 border border-white/10 px-3 py-3 text-slate-100 placeholder:text-slate-500 focus:border-brand focus:outline-none;
   }
   .label {
     @apply block text-xs font-medium uppercase tracking-wide text-slate-400 mb-1;

@@ -30,8 +30,7 @@ export default function App() {
     <div className="min-h-full flex flex-col max-w-md mx-auto">
       <header className="safe-top sticky top-0 z-30 bg-ink-950/85 backdrop-blur border-b border-white/5">
         <div className="px-4 py-3 flex items-center gap-2">
-          <img src="/icons/favicon.svg" alt="" className="w-7 h-7" />
-          <div className="font-black tracking-tight">
+          <div className="font-black tracking-tight text-lg">
             Sub<span className="text-brand">9</span>
           </div>
           <div className="text-xs text-slate-500 ml-auto">Vätternrundan 2027</div>
