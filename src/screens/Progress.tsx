@@ -346,7 +346,7 @@ function FtpSheet({
   return (
     <Sheet open={open} onClose={onClose} title="Nytt FTP-test">
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 [&>*]:min-w-0">
           <div>
             <label className="label">Datum</label>
             <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
