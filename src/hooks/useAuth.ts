@@ -29,13 +29,11 @@ export function useAuth() {
     };
   }, []);
 
-  async function signIn(email: string) {
-    return supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: window.location.origin + import.meta.env.BASE_URL,
-      },
-    });
+  async function signUp(email: string, password: string) {
+    return supabase.auth.signUp({ email, password });
+  }
+  async function signIn(email: string, password: string) {
+    return supabase.auth.signInWithPassword({ email, password });
   }
   async function signOut() {
     return supabase.auth.signOut();
@@ -45,6 +43,7 @@ export function useAuth() {
     session,
     email: session?.user?.email ?? null,
     ready,
+    signUp,
     signIn,
     signOut,
   };

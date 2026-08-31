@@ -208,10 +208,12 @@ export function Settings() {
 }
 
 function AccountSync() {
-  const { email, signIn, signOut } = useAuth();
+  const { email, signUp, signIn, signOut } = useAuth();
   const sync = useSyncState();
   const [emailInput, setEmailInput] = useState("");
+  const [password, setPassword] = useState("");
   const [msg, setMsg] = useState("");
+  const [msgKind, setMsgKind] = useState<"info" | "error">("info");
   const [busy, setBusy] = useState(false);
 
   const statusLabel =
@@ -225,18 +227,64 @@ function AccountSync() {
       ? "Offline"
       : "Endast lokalt";
 
-  async function send() {
+  function translateError(m: string): string {
+    const s = m.toLowerCase();
+    if (s.includes("invalid login")) return "Fel e-post eller lösenord.";
+    if (
+      s.includes("already registered") ||
+      s.includes("already been registered") ||
+      s.includes("user already")
+    )
+      return "Det finns redan ett konto med den e-posten – tryck Logga in istället.";
+    if (
+      s.includes("password") &&
+      (s.includes("6") || s.includes("short") || s.includes("weak") || s.includes("at least"))
+    )
+      return "Lösenordet måste vara minst 6 tecken.";
+    if (s.includes("email") && s.includes("valid")) return "Ogiltig e-postadress.";
+    if (s.includes("fetch") || s.includes("network"))
+      return "Nätverksfel – kontrollera din uppkoppling.";
+    if (s.includes("confirm"))
+      return "Bekräfta din e-post via mejlet, eller be om att e-postbekräftelse stängs av.";
+    return m;
+  }
+
+  async function doSignUp() {
     const value = emailInput.trim();
-    if (!value) return;
+    if (!value || password.length < 6) return;
     setBusy(true);
     setMsg("");
-    const { error } = await signIn(value);
+    const { data, error } = await signUp(value, password);
     setBusy(false);
-    setMsg(
-      error
-        ? `Fel: ${error.message}`
-        : "Inloggningslänk skickad – öppna länken i mejlet på den här enheten."
-    );
+    if (error) {
+      setMsgKind("error");
+      setMsg(translateError(error.message));
+      return;
+    }
+    if (data.user && !data.session) {
+      setMsgKind("info");
+      setMsg(
+        "Konto skapat! Bekräfta din e-post via mejlet, eller be om att e-postbekräftelse stängs av i Supabase."
+      );
+      return;
+    }
+    setMsgKind("info");
+    setMsg("Konto skapat och inloggad – synkar din data…");
+  }
+
+  async function doSignIn() {
+    const value = emailInput.trim();
+    if (!value || !password) return;
+    setBusy(true);
+    setMsg("");
+    const { error } = await signIn(value, password);
+    setBusy(false);
+    if (error) {
+      setMsgKind("error");
+      setMsg(translateError(error.message));
+      return;
+    }
+    setMsg("");
   }
 
   return (
@@ -270,9 +318,9 @@ function AccountSync() {
       ) : (
         <>
           <p className="text-xs text-slate-400">
-            Logga in med din mejl för att synka din data (loggade pass, FTP-tester,
-            inställningar) mellan alla dina enheter. Appen fungerar även utan inloggning
-            – då sparas allt bara lokalt på den här enheten.
+            Skapa konto eller logga in med e-post och lösenord för att synka din data
+            (loggade pass, FTP-tester, inställningar) mellan alla dina enheter. Appen
+            fungerar även utan inloggning – då sparas allt bara lokalt på den här enheten.
           </p>
           <input
             type="email"
@@ -283,14 +331,39 @@ function AccountSync() {
             value={emailInput}
             onChange={(e) => setEmailInput(e.target.value)}
           />
-          <button
-            className="btn-primary w-full"
-            onClick={send}
-            disabled={busy || !emailInput.trim()}
-          >
-            {busy ? "Skickar…" : "Skicka inloggningslänk"}
-          </button>
-          {msg && <div className="text-xs text-emerald-300">{msg}</div>}
+          <input
+            type="password"
+            autoComplete="current-password"
+            className="input"
+            placeholder="Lösenord (minst 6 tecken)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <button
+              className="btn-ghost flex-1"
+              onClick={doSignUp}
+              disabled={busy || !emailInput.trim() || password.length < 6}
+            >
+              {busy ? "…" : "Skapa konto"}
+            </button>
+            <button
+              className="btn-primary flex-1"
+              onClick={doSignIn}
+              disabled={busy || !emailInput.trim() || !password}
+            >
+              {busy ? "…" : "Logga in"}
+            </button>
+          </div>
+          {msg && (
+            <div
+              className={`text-xs ${
+                msgKind === "error" ? "text-red-300" : "text-emerald-300"
+              }`}
+            >
+              {msg}
+            </div>
+          )}
         </>
       )}
     </div>
