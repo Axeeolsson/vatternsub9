@@ -236,6 +236,7 @@ export interface LevelAssessment {
   goalSeconds: number;
   requiredFtp: number;
   requiredWattsPerKg: number;
+  requiredFtpWellPrepared: number; // required FTP at a well-prepared reference IF
   deltaSeconds: number; // projected - goal (neg = ahead)
   ratio: number; // ftp / requiredFtp
   status: LevelStatus;
@@ -425,7 +426,17 @@ export function assessLevel(
   // "Required FTP" is a stable target at a well-prepared reference IF, so it
   // doesn't drift as durability improves — you train FTP toward it. It DOES use
   // the current group size, since the draft you'll get is a race-day choice.
+  // Use the SAME intensity factor as the projection so the two agree:
+  // FTP >= requiredFtp then implies projected finish <= goal.
   const req = requiredFtp(
+    eff.goalFinishSeconds,
+    weightKg,
+    eff.bikeMassKg,
+    durability.intensityFactor,
+    draftFactor
+  );
+  // Motivational target: what a well-prepared (high-durability) rider needs.
+  const reqWellPrepared = requiredFtp(
     eff.goalFinishSeconds,
     weightKg,
     eff.bikeMassKg,
@@ -462,6 +473,7 @@ export function assessLevel(
     goalSeconds,
     requiredFtp: req.ftp,
     requiredWattsPerKg: req.wattsPerKg,
+    requiredFtpWellPrepared: reqWellPrepared.ftp,
     deltaSeconds,
     ratio,
     status,

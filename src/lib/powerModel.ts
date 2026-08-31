@@ -121,5 +121,6 @@ export function requiredFtp(
   const avgSpeedKmh = DISTANCE_KM / goalHours;
   const power = powerForSpeed(avgSpeedKmh, total, cda);
   const ftp = power / intensityFactor;
-  return { ftp: Math.round(ftp), wattsPerKg: ftp / riderKg, avgSpeedKmh };
+  // ceil so that reaching requiredFtp always achieves the goal (never 1s short).
+  return { ftp: Math.ceil(ftp), wattsPerKg: ftp / riderKg, avgSpeedKmh };
 }

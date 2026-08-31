@@ -116,7 +116,12 @@ export function Progress() {
         <Stat
           label="Krävd FTP för sub 9h"
           value={`${level.requiredFtp} W`}
-          sub={`${level.requiredWattsPerKg.toFixed(2)} W/kg`}
+          sub={
+            <>
+              {level.requiredWattsPerKg.toFixed(2)} W/kg · vid god uthållighet ~
+              {level.requiredFtpWellPrepared} W
+            </>
+          }
         />
         <Stat
           label="Auto-justering"
@@ -179,6 +184,10 @@ export function Progress() {
           håller {Math.round(level.sustainableIF * 100)}%{" "}
           <span className="text-sm font-medium text-slate-400">av FTP i 9h</span>
         </div>
+        <p className="text-xs text-slate-500 mt-2">
+          Krävd FTP sjunker när din uthållighet (långpass) ökar – med fler långpass
+          räcker en lägre FTP för sub 9h.
+        </p>
         <div className="mt-2 h-2 rounded-full bg-ink-800 overflow-hidden">
           <div
             className="h-full rounded-full"
