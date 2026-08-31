@@ -23,6 +23,7 @@ import { addDays, todayISO } from "./format";
 import { modelFtp, MIN_FTP_EFFORT_MIN } from "./ftpModel";
 import { computeDurability } from "./durability";
 import { transferFactorForSession } from "./logFields";
+import { effectiveSettings } from "./settings";
 
 export interface EngineState {
   planned: StoredPlannedSession[];
@@ -316,11 +317,12 @@ export function computeProgression(
   const buildWeek = !!wi && !wi.isRecovery && !isTaperOrRace;
 
   // FTP trend over ~3.5 weeks.
-  const ftpNow = modelFtp(state.ftps, state.logged, state.settings.currentFtp, asOfISO).ftp;
+  const eff = effectiveSettings(state.settings);
+  const ftpNow = modelFtp(state.ftps, state.logged, eff.currentFtp, asOfISO).ftp;
   const ftpPast = modelFtp(
     state.ftps,
     state.logged,
-    state.settings.currentFtp,
+    eff.currentFtp,
     addDays(asOfISO, -24)
   ).ftp;
   const ftpDeltaPct = ftpPast > 0 ? (ftpNow - ftpPast) / ftpPast : 0;
@@ -404,19 +406,19 @@ export function assessLevel(
   state: EngineState,
   asOfISO: string = todayISO()
 ): LevelAssessment {
-  const { settings } = state;
-  const modeled = modelFtp(state.ftps, state.logged, settings.currentFtp, asOfISO);
+  const eff = effectiveSettings(state.settings);
+  const modeled = modelFtp(state.ftps, state.logged, eff.currentFtp, asOfISO);
   const ftp = modeled.ftp;
   // Settings weight is the source of truth for current weight.
-  const weightKg = settings.weightKg;
+  const weightKg = eff.weightKg;
   // Durability: endurance training raises the fraction of FTP held for 9h.
   const durability = computeDurability(state.logged, asOfISO);
   // Draft: more riders save more power (lower effective aero), saturating.
-  const draftFactor = draftFactorForRiders(settings.groupSize);
+  const draftFactor = draftFactorForRiders(eff.groupSize);
   const est = estimateRace(
     ftp,
     weightKg,
-    settings.bikeMassKg,
+    eff.bikeMassKg,
     durability.intensityFactor,
     draftFactor
   );
@@ -424,14 +426,14 @@ export function assessLevel(
   // doesn't drift as durability improves — you train FTP toward it. It DOES use
   // the current group size, since the draft you'll get is a race-day choice.
   const req = requiredFtp(
-    settings.goalFinishSeconds,
+    eff.goalFinishSeconds,
     weightKg,
-    settings.bikeMassKg,
+    eff.bikeMassKg,
     RACE_REFERENCE_IF,
     draftFactor
   );
   const ratio = ftp / req.ftp;
-  const goalSeconds = settings.goalFinishSeconds;
+  const goalSeconds = eff.goalFinishSeconds;
   const deltaSeconds = est.finishSeconds - goalSeconds;
 
   let status: LevelStatus;
@@ -443,10 +445,10 @@ export function assessLevel(
   // factor, with clear precedence: never overload recovery/taper weeks, and
   // ease off (ignoring any goal bump) when readiness is poor.
   const goalFactor =
-    settings.autoAdjust && Math.abs(ratio - 1) > 0.03 ? clamp(ratio, 0.9, 1.2) : 1;
+    eff.autoAdjust && Math.abs(ratio - 1) > 0.03 ? clamp(ratio, 0.9, 1.2) : 1;
   const prog = computeProgression(state, asOfISO, ratio);
   let loadFactor = 1;
-  if (settings.autoAdjust) {
+  if (eff.autoAdjust) {
     if (!prog.buildWeek) loadFactor = 1;
     else if (prog.eased) loadFactor = prog.progressionFactor;
     else loadFactor = clamp(goalFactor * prog.progressionFactor, 0.85, 1.25);
@@ -489,7 +491,7 @@ export function assessLevel(
     longestRideKm: durability.longestRideKm,
     weeklyEnduranceHours: durability.weeklyEnduranceHours,
     hasLongRides: durability.hasLongRides,
-    groupSize: settings.groupSize,
+    groupSize: eff.groupSize,
     draftFactor,
     draftSavingPct: Math.round((1 - draftFactor) * 100),
   };
@@ -892,7 +894,7 @@ export function recommendForDate(
   // Case A: today is a planned rest day.
   if (plannedToday && plannedToday.sessionType === "rest") {
     const restObserved = rec.restObservedBefore(todayISO);
-    const needMoreRest = restObserved < state.settings.restDaysPerWeek;
+    const needMoreRest = restObserved < effectiveSettings(state.settings).restDaysPerWeek;
     if (needMoreRest || rec.remainingTraining.length === 0) {
       return base({
         status: "rest",

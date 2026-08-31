@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { useEngineState } from "../hooks/useData";
 import { assessLevel } from "../lib/planEngine";
+import { profileIncomplete } from "../lib/settings";
 import { zonesForFtp } from "../lib/zones";
 import { fmtHms, fmtDateShort, todayISO, fmtDuration } from "../lib/format";
 import { Sheet, Stat } from "../components/ui";
@@ -21,6 +22,7 @@ export function Progress() {
   const [ftpOpen, setFtpOpen] = useState(false);
 
   const level = useMemo(() => (state ? assessLevel(state) : undefined), [state]);
+  const needsProfile = state ? profileIncomplete(state.settings) : false;
 
   if (!state || !level) return <div className="p-6 text-slate-400">Laddar…</div>;
 
@@ -49,6 +51,12 @@ export function Progress() {
         <div className="card p-3 border border-amber-500/30 bg-amber-500/5 text-xs text-amber-200/90">
           Preliminär beräkning: baseras på en <b>uppskattad FTP ({level.ftp} W)</b>,
           inte på loggade pass. Lägg till ett riktigt FTP-test så blir tiden korrekt.
+        </div>
+      )}
+
+      {needsProfile && (
+        <div className="card p-3 border border-sky-500/30 bg-sky-500/5 text-xs text-sky-200/90">
+          Ange din <b>vikt</b> och <b>FTP</b> under <b>Mer</b> för en korrekt beräkning.
         </div>
       )}
 

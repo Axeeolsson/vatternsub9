@@ -101,12 +101,15 @@ export type LegacyGroupSize = "solo" | "small" | "medium" | "large" | "xlarge";
 
 export interface Settings {
   id: "singleton";
-  weightKg: number;
-  currentFtp: number;
-  goalFinishSeconds: number; // sub-9h => 9*3600
-  restDaysPerWeek: number;
-  bikeMassKg: number;
+  // Profile values are OPTIONAL: a fresh account leaves them unset (blank
+  // inputs). The engine reads them through effectiveSettings() which supplies
+  // safe fallbacks, so unset never means NaN in calculations.
+  weightKg?: number;
+  currentFtp?: number;
+  goalFinishSeconds?: number; // sub-9h => 9*3600
+  restDaysPerWeek?: number;
+  bikeMassKg?: number;
   autoAdjust: boolean;
-  groupSize: number; // exact number of riders in the group/paceline (1 = solo)
+  groupSize?: number; // exact number of riders in the group/paceline (1 = solo)
   updatedAt?: number; // epoch ms of last local edit (for cloud last-write-wins)
 }

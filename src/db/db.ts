@@ -6,6 +6,7 @@ import type {
   Settings,
 } from "../lib/types";
 import planSeed from "../data/plan.seed";
+import { FALLBACKS } from "../lib/settings";
 
 // A planned session stored in the DB: the seed fields plus a "satisfied" flag
 // the engine can toggle when a matching session is logged.
@@ -21,15 +22,11 @@ export interface Tombstone {
   updatedAt: number;
 }
 
+// A fresh account starts with an EMPTY profile (blank inputs). Only autoAdjust
+// has a sensible default. The engine fills gaps via effectiveSettings().
 export const DEFAULT_SETTINGS: Settings = {
   id: "singleton",
-  weightKg: 78,
-  currentFtp: 220,
-  goalFinishSeconds: 9 * 3600,
-  restDaysPerWeek: 1,
-  bikeMassKg: 9,
   autoAdjust: true,
-  groupSize: 8,
 };
 
 export function newUuid(): string {
@@ -127,8 +124,8 @@ export async function ensureSeeded(): Promise<void> {
       if (anyFtp === 0) {
         await db.ftpTests.put({
           date: planSeed.startDateISO,
-          ftpWatts: DEFAULT_SETTINGS.currentFtp,
-          weightKg: DEFAULT_SETTINGS.weightKg,
+          ftpWatts: FALLBACKS.currentFtp,
+          weightKg: FALLBACKS.weightKg,
           source: "estimate",
           notes: "Startvärde – uppdatera efter ditt första FTP-test.",
           syncId: newUuid(),

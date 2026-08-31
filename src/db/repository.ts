@@ -18,14 +18,14 @@ const LEGACY_GROUP_TO_RIDERS: Record<string, number> = {
   xlarge: 20,
 };
 
-function coerceGroupSize(value: unknown): number {
+function coerceGroupSize(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value) && value >= 1) {
     return Math.round(value);
   }
   if (typeof value === "string" && value in LEGACY_GROUP_TO_RIDERS) {
     return LEGACY_GROUP_TO_RIDERS[value];
   }
-  return DEFAULT_SETTINGS.groupSize;
+  return undefined; // unset -> stays blank in the UI, engine uses fallback
 }
 
 export const repo = {
