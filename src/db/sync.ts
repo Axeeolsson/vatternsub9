@@ -127,65 +127,52 @@ function settingsToRemote(s: Settings, userId: string) {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-// ---- table sync ------------------------------------------------------------
+// ---- de-duplication --------------------------------------------------------
 
-async function syncLogged(userId: string) {
-  const { data: remoteRows, error } = await supabase
-    .from("logged_sessions")
-    .select("*");
-  if (error) throw error;
-  const remote = remoteRows ?? [];
-  const tombs = await db.tombstones.where("table").equals("logged").toArray();
-  const tombSet = new Set(tombs.map((t) => t.syncId));
-
-  // Pull remote -> local (skip syncIds we have a pending local delete for).
-  for (const r of remote) {
-    if (tombSet.has(r.sync_id)) continue;
-    const local = await db.loggedSessions.where("syncId").equals(r.sync_id).first();
-    if (r.deleted) {
-      if (local?.id != null) await db.loggedSessions.delete(local.id);
-      continue;
-    }
-    if (!local) {
-      await db.loggedSessions.add(remoteToLogged(r));
-    } else if (ms(r.updated_at) > (local.updatedAt ?? 0)) {
-      await db.loggedSessions.put({ ...remoteToLogged(r), id: local.id });
-    }
-  }
-
-  // Push local -> remote.
-  const remoteBy = new Map(remote.map((r) => [r.sync_id, r]));
-  const locals = await db.loggedSessions.toArray();
-  const ups: ReturnType<typeof loggedToRemote>[] = [];
-  for (const l of locals) {
-    if (!l.syncId) continue;
-    const r = remoteBy.get(l.syncId);
-    if (!r || (l.updatedAt ?? 0) > ms(r.updated_at)) ups.push(loggedToRemote(l, userId));
-  }
-  for (const t of tombs) {
-    const r = remoteBy.get(t.syncId);
-    if (!r || t.updatedAt > ms(r.updated_at))
-      ups.push({
-        ...(r ? remoteToLoggedRemoteShell(r, userId) : emptyLoggedShell(t.syncId, userId)),
-        updated_at: iso(t.updatedAt),
-        deleted: true,
-      });
-  }
-  if (ups.length) {
-    const { error: upErr } = await supabase
-      .from("logged_sessions")
-      .upsert(ups, { onConflict: "user_id,sync_id" });
-    if (upErr) throw upErr;
-  }
-  if (tombs.length) await db.tombstones.bulkDelete(tombs.map((t) => t.syncId));
+// Content signatures used to collapse rows that were given different syncIds on
+// different devices (the historical cause of multiplying duplicates).
+function sigLogged(l: LoggedSession): string {
+  return [
+    l.date,
+    l.sessionType,
+    l.durationMin ?? "",
+    l.title ?? "",
+    l.avgWatts ?? "",
+    l.completedAt ?? "",
+  ].join("|");
+}
+function sigFtp(t: FtpTest): string {
+  return [t.date, t.ftpWatts ?? "", t.source ?? ""].join("|");
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-function remoteToLoggedRemoteShell(r: any, userId: string) {
-  return { ...r, user_id: userId };
+// Keep one canonical row per content signature (the smallest syncId, so every
+// device converges to the same survivor), delete the rest locally and tombstone
+// them so the cloud copies are removed too. Idempotent: no dupes -> no-op.
+async function dedupeLocal<T extends { id?: number; syncId?: string }>(
+  rows: T[],
+  sig: (r: T) => string,
+  del: (id: number) => Promise<void>,
+  table: Tombstone["table"]
+): Promise<void> {
+  const groups = new Map<string, T[]>();
+  for (const r of rows) {
+    const k = sig(r);
+    const g = groups.get(k);
+    if (g) g.push(r);
+    else groups.set(k, [r]);
+  }
+  for (const g of groups.values()) {
+    if (g.length <= 1) continue;
+    g.sort((a, b) => (a.syncId ?? "").localeCompare(b.syncId ?? ""));
+    for (const dup of g.slice(1)) {
+      if (dup.id != null) await del(dup.id);
+      if (dup.syncId)
+        await db.tombstones.put({ table, syncId: dup.syncId, updatedAt: Date.now() });
+    }
+  }
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
-function emptyLoggedShell(syncId: string, userId: string) {
+
+function loggedTombstone(syncId: string, userId: string, updatedAt: number) {
   return {
     user_id: userId,
     sync_id: syncId,
@@ -205,20 +192,77 @@ function emptyLoggedShell(syncId: string, userId: string) {
     notes: null,
     satisfies_planned_id: null,
     completed_at: null,
-    updated_at: iso(),
+    updated_at: iso(updatedAt),
     deleted: true,
-  } as unknown as ReturnType<typeof loggedToRemote>;
+  };
+}
+
+// ---- table sync ------------------------------------------------------------
+
+async function syncLogged(userId: string) {
+  const { data: remoteRows, error } = await supabase
+    .from("logged_sessions")
+    .select("*");
+  if (error) throw error;
+  const remote = remoteRows ?? [];
+  const pendingTombs = await db.tombstones.where("table").equals("logged").toArray();
+  const tombSet = new Set(pendingTombs.map((t) => t.syncId));
+
+  // Pull remote -> local, strictly keyed by syncId (preserve the remote syncId,
+  // never regenerate). Skip syncIds we have a pending local delete for.
+  for (const r of remote) {
+    if (!r.sync_id || tombSet.has(r.sync_id)) continue;
+    const local = await db.loggedSessions.where("syncId").equals(r.sync_id).first();
+    if (r.deleted) {
+      if (local?.id != null) await db.loggedSessions.delete(local.id);
+      continue;
+    }
+    if (!local) await db.loggedSessions.add(remoteToLogged(r));
+    else if (ms(r.updated_at) > (local.updatedAt ?? 0))
+      await db.loggedSessions.put({ ...remoteToLogged(r), id: local.id });
+  }
+
+  // Collapse content duplicates left over from earlier buggy syncs.
+  await dedupeLocal(
+    await db.loggedSessions.toArray(),
+    sigLogged,
+    (id) => db.loggedSessions.delete(id),
+    "logged"
+  );
+
+  // Push local -> remote using existing syncIds only.
+  const remoteBy = new Map(remote.map((r) => [r.sync_id, r]));
+  const locals = await db.loggedSessions.toArray();
+  const tombs = await db.tombstones.where("table").equals("logged").toArray();
+  const ups: Record<string, unknown>[] = [];
+  for (const l of locals) {
+    if (!l.syncId) continue;
+    const r = remoteBy.get(l.syncId);
+    if (!r || (l.updatedAt ?? 0) > ms(r.updated_at)) ups.push(loggedToRemote(l, userId));
+  }
+  for (const t of tombs) {
+    const r = remoteBy.get(t.syncId);
+    if (r && r.deleted) continue; // already deleted in the cloud
+    ups.push(loggedTombstone(t.syncId, userId, t.updatedAt));
+  }
+  if (ups.length) {
+    const { error: upErr } = await supabase
+      .from("logged_sessions")
+      .upsert(ups, { onConflict: "user_id,sync_id" });
+    if (upErr) throw upErr;
+  }
+  if (tombs.length) await db.tombstones.bulkDelete(tombs.map((t) => t.syncId));
 }
 
 async function syncFtp(userId: string) {
   const { data: remoteRows, error } = await supabase.from("ftp_tests").select("*");
   if (error) throw error;
   const remote = remoteRows ?? [];
-  const tombs = await db.tombstones.where("table").equals("ftp").toArray();
-  const tombSet = new Set(tombs.map((t) => t.syncId));
+  const pendingTombs = await db.tombstones.where("table").equals("ftp").toArray();
+  const tombSet = new Set(pendingTombs.map((t) => t.syncId));
 
   for (const r of remote) {
-    if (tombSet.has(r.sync_id)) continue;
+    if (!r.sync_id || tombSet.has(r.sync_id)) continue;
     const local = await db.ftpTests.where("syncId").equals(r.sync_id).first();
     if (r.deleted) {
       if (local?.id != null) await db.ftpTests.delete(local.id);
@@ -229,8 +273,16 @@ async function syncFtp(userId: string) {
       await db.ftpTests.put({ ...remoteToFtp(r), id: local.id });
   }
 
+  await dedupeLocal(
+    await db.ftpTests.toArray(),
+    sigFtp,
+    (id) => db.ftpTests.delete(id),
+    "ftp"
+  );
+
   const remoteBy = new Map(remote.map((r) => [r.sync_id, r]));
   const locals = await db.ftpTests.toArray();
+  const tombs = await db.tombstones.where("table").equals("ftp").toArray();
   const ups: Record<string, unknown>[] = [];
   for (const t of locals) {
     if (!t.syncId) continue;
@@ -239,18 +291,18 @@ async function syncFtp(userId: string) {
   }
   for (const t of tombs) {
     const r = remoteBy.get(t.syncId);
-    if (!r || t.updatedAt > ms(r.updated_at))
-      ups.push({
-        user_id: userId,
-        sync_id: t.syncId,
-        date: null,
-        ftp_watts: null,
-        weight_kg: null,
-        source: null,
-        notes: null,
-        updated_at: iso(t.updatedAt),
-        deleted: true,
-      });
+    if (r && r.deleted) continue;
+    ups.push({
+      user_id: userId,
+      sync_id: t.syncId,
+      date: null,
+      ftp_watts: null,
+      weight_kg: null,
+      source: null,
+      notes: null,
+      updated_at: iso(t.updatedAt),
+      deleted: true,
+    });
   }
   if (ups.length) {
     const { error: upErr } = await supabase
@@ -268,12 +320,12 @@ async function syncSettings(userId: string) {
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
-  const localRaw = await db.settings.get("singleton");
-  const local = localRaw ?? undefined;
+  const local = (await db.settings.get("singleton")) ?? undefined;
   const localMs = local?.updatedAt ?? 0;
+  const remoteMs = ms(remote?.updated_at);
 
-  if (remote && ms(remote.updated_at) > localMs) {
-    // remote newer -> apply to local without bumping updatedAt
+  // PULL FIRST: adopt a real cloud row instead of letting local defaults win.
+  if (remote && remoteMs > localMs) {
     const patch: Settings = {
       id: "singleton",
       weightKg: remote.weight_kg,
@@ -283,10 +335,14 @@ async function syncSettings(userId: string) {
       bikeMassKg: remote.bike_mass_kg,
       autoAdjust: remote.auto_adjust,
       groupSize: remote.group_size,
-      updatedAt: ms(remote.updated_at),
+      updatedAt: remoteMs,
     };
     await db.settings.put(patch);
-  } else if (local && localMs >= ms(remote?.updated_at)) {
+    return;
+  }
+  // Push only if local is STRICTLY newer. Untouched defaults have updatedAt 0
+  // and therefore can never overwrite a real cloud settings row.
+  if (local && localMs > remoteMs) {
     const { error: upErr } = await supabase
       .from("user_settings")
       .upsert(settingsToRemote(local, userId), { onConflict: "user_id" });

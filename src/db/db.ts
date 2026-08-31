@@ -120,7 +120,9 @@ export async function ensureSeeded(): Promise<void> {
       }
       const existing = await db.settings.get("singleton");
       if (!existing)
-        await db.settings.put({ ...DEFAULT_SETTINGS, updatedAt: Date.now() });
+        // updatedAt 0: untouched defaults must NEVER win last-write-wins against
+        // a real cloud settings row (otherwise a fresh device would clobber it).
+        await db.settings.put({ ...DEFAULT_SETTINGS, updatedAt: 0 });
       const anyFtp = await db.ftpTests.count();
       if (anyFtp === 0) {
         await db.ftpTests.put({
