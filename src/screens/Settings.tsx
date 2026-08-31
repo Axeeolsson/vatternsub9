@@ -3,6 +3,7 @@ import { repo } from "../db/repository";
 import type { Settings as SettingsT } from "../lib/types";
 import { fmtHms } from "../lib/format";
 import { draftFactorForRiders } from "../lib/powerModel";
+import { useAuth, useSyncState } from "../hooks/useAuth";
 
 export function Settings() {
   const [s, setS] = useState<SettingsT | null>(null);
@@ -48,6 +49,8 @@ export function Settings() {
   return (
     <div className="p-4 space-y-4 safe-bottom">
       <h1 className="text-xl font-bold">Inställningar</h1>
+
+      <AccountSync />
 
       <div className="card p-4 space-y-3">
         <div className="text-sm font-semibold text-slate-200">Din profil</div>
@@ -200,6 +203,96 @@ export function Settings() {
       <div className="text-center text-xs text-slate-600 pt-2">
         Vätternrundan sub-9h · lokal & privat · v1
       </div>
+    </div>
+  );
+}
+
+function AccountSync() {
+  const { email, signIn, signOut } = useAuth();
+  const sync = useSyncState();
+  const [emailInput, setEmailInput] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const statusLabel =
+    sync.status === "syncing"
+      ? "Synkar…"
+      : sync.status === "idle"
+      ? "Synkad"
+      : sync.status === "error"
+      ? "Synkfel"
+      : sync.status === "offline"
+      ? "Offline"
+      : "Endast lokalt";
+
+  async function send() {
+    const value = emailInput.trim();
+    if (!value) return;
+    setBusy(true);
+    setMsg("");
+    const { error } = await signIn(value);
+    setBusy(false);
+    setMsg(
+      error
+        ? `Fel: ${error.message}`
+        : "Inloggningslänk skickad – öppna länken i mejlet på den här enheten."
+    );
+  }
+
+  return (
+    <div className="card p-4 space-y-3">
+      <div className="text-sm font-semibold text-slate-200">Konto & synk</div>
+      {email ? (
+        <>
+          <div className="text-sm text-slate-300">
+            Inloggad som <b>{email}</b>
+          </div>
+          <div className="text-xs text-slate-400">
+            Status: {statusLabel}
+            {sync.lastSyncAt
+              ? ` · senast ${new Date(sync.lastSyncAt).toLocaleString("sv-SE")}`
+              : ""}
+          </div>
+          {sync.error && <div className="text-xs text-red-300">{sync.error}</div>}
+          <div className="flex gap-2">
+            <button
+              className="btn-ghost flex-1"
+              onClick={() => sync.syncNow()}
+              disabled={sync.status === "syncing"}
+            >
+              {sync.status === "syncing" ? "Synkar…" : "Synka nu"}
+            </button>
+            <button className="btn-ghost flex-1 text-red-300" onClick={() => signOut()}>
+              Logga ut
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-xs text-slate-400">
+            Logga in med din mejl för att synka din data (loggade pass, FTP-tester,
+            inställningar) mellan alla dina enheter. Appen fungerar även utan inloggning
+            – då sparas allt bara lokalt på den här enheten.
+          </p>
+          <input
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            className="input"
+            placeholder="din@mejl.se"
+            value={emailInput}
+            onChange={(e) => setEmailInput(e.target.value)}
+          />
+          <button
+            className="btn-primary w-full"
+            onClick={send}
+            disabled={busy || !emailInput.trim()}
+          >
+            {busy ? "Skickar…" : "Skicka inloggningslänk"}
+          </button>
+          {msg && <div className="text-xs text-emerald-300">{msg}</div>}
+        </>
+      )}
     </div>
   );
 }

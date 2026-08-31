@@ -1,10 +1,13 @@
-import { db, DEFAULT_SETTINGS, ensureSeeded, type StoredPlannedSession } from "./db";
-import type {
-  FtpTest,
-  LoggedSession,
-  Settings,
-} from "../lib/types";
+import {
+  db,
+  DEFAULT_SETTINGS,
+  ensureSeeded,
+  newUuid,
+  type StoredPlannedSession,
+} from "./db";
+import type { FtpTest, LoggedSession, Settings } from "../lib/types";
 import planSeed from "../data/plan.seed";
+import { notifyLocalChange, recordTombstone } from "./sync";
 
 // Migrate legacy string buckets (from an earlier version) into a rider count.
 const LEGACY_GROUP_TO_RIDERS: Record<string, number> = {
@@ -36,7 +39,8 @@ export const repo = {
   },
   async saveSettings(patch: Partial<Settings>): Promise<void> {
     const cur = await repo.getSettings();
-    await db.settings.put({ ...cur, ...patch, id: "singleton" });
+    await db.settings.put({ ...cur, ...patch, id: "singleton", updatedAt: Date.now() });
+    notifyLocalChange();
   },
 
   // ---- planned ----
@@ -62,13 +66,24 @@ export const repo = {
     return db.loggedSessions.where("date").equals(date).toArray();
   },
   async addLogged(s: Omit<LoggedSession, "id">): Promise<number> {
-    return db.loggedSessions.add(s as LoggedSession);
+    const rec: LoggedSession = {
+      ...s,
+      syncId: s.syncId ?? newUuid(),
+      updatedAt: Date.now(),
+    };
+    const id = await db.loggedSessions.add(rec as LoggedSession);
+    notifyLocalChange();
+    return id;
   },
   async updateLogged(id: number, patch: Partial<LoggedSession>): Promise<void> {
-    await db.loggedSessions.update(id, patch);
+    await db.loggedSessions.update(id, { ...patch, updatedAt: Date.now() });
+    notifyLocalChange();
   },
   async deleteLogged(id: number): Promise<void> {
+    const rec = await db.loggedSessions.get(id);
     await db.loggedSessions.delete(id);
+    await recordTombstone("logged", rec?.syncId);
+    notifyLocalChange();
   },
 
   // ---- FTP ----
@@ -80,7 +95,12 @@ export const repo = {
     return all[all.length - 1];
   },
   async addFtp(t: Omit<FtpTest, "id">): Promise<number> {
-    const id = await db.ftpTests.add(t as FtpTest);
+    const rec: FtpTest = {
+      ...t,
+      syncId: t.syncId ?? newUuid(),
+      updatedAt: Date.now(),
+    };
+    const id = await db.ftpTests.add(rec as FtpTest);
     // keep settings.currentFtp in sync with the latest test
     const latest = await repo.latestFtp();
     if (latest) {
@@ -89,12 +109,16 @@ export const repo = {
         ...(latest.weightKg ? { weightKg: latest.weightKg } : {}),
       });
     }
+    notifyLocalChange();
     return id;
   },
   async deleteFtp(id: number): Promise<void> {
+    const rec = await db.ftpTests.get(id);
     await db.ftpTests.delete(id);
+    await recordTombstone("ftp", rec?.syncId);
     const latest = await repo.latestFtp();
     if (latest) await repo.saveSettings({ currentFtp: latest.ftpWatts });
+    notifyLocalChange();
   },
 
   // ---- backup ----
@@ -131,19 +155,31 @@ export const repo = {
       db.plannedSessions,
       async () => {
         if (data.settings)
-          await db.settings.put({ ...data.settings, id: "singleton" });
+          await db.settings.put({
+            ...data.settings,
+            id: "singleton",
+            updatedAt: Date.now(),
+          });
         if (Array.isArray(data.loggedSessions)) {
           await db.loggedSessions.clear();
           for (const s of data.loggedSessions) {
             const { id: _drop, ...rest } = s;
-            await db.loggedSessions.add(rest);
+            await db.loggedSessions.add({
+              ...rest,
+              syncId: rest.syncId ?? newUuid(),
+              updatedAt: Date.now(),
+            });
           }
         }
         if (Array.isArray(data.ftpTests)) {
           await db.ftpTests.clear();
           for (const t of data.ftpTests) {
             const { id: _drop, ...rest } = t;
-            await db.ftpTests.add(rest);
+            await db.ftpTests.add({
+              ...rest,
+              syncId: rest.syncId ?? newUuid(),
+              updatedAt: Date.now(),
+            });
           }
         }
         if (Array.isArray(data.plannedOverrides)) {
@@ -151,6 +187,7 @@ export const repo = {
         }
       }
     );
+    notifyLocalChange();
   },
 
   /** Wipe all user data and re-seed the template from scratch. */

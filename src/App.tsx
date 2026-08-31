@@ -12,6 +12,7 @@ import { Schedule } from "./screens/Schedule";
 import { LogScreen } from "./screens/LogScreen";
 import { Progress } from "./screens/Progress";
 import { Settings } from "./screens/Settings";
+import { useAuth, useSyncState } from "./hooks/useAuth";
 
 type Tab = "home" | "schedule" | "log" | "progress" | "settings";
 
@@ -33,7 +34,7 @@ export default function App() {
           <div className="font-black tracking-tight text-lg">
             Sub<span className="text-brand">9</span>
           </div>
-          <div className="text-xs text-slate-500 ml-auto">Vätternrundan 2027</div>
+          <SyncBadge />
         </div>
       </header>
 
@@ -65,6 +66,38 @@ export default function App() {
           })}
         </div>
       </nav>
+    </div>
+  );
+}
+
+function SyncBadge() {
+  const { email } = useAuth();
+  const sync = useSyncState();
+  const color = !email
+    ? "#64748b"
+    : sync.status === "error"
+    ? "#f87171"
+    : sync.status === "syncing"
+    ? "#fbbf24"
+    : sync.status === "offline"
+    ? "#94a3b8"
+    : "#34d399";
+  const label = !email
+    ? "Lokalt"
+    : sync.status === "syncing"
+    ? "Synkar"
+    : sync.status === "error"
+    ? "Fel"
+    : sync.status === "offline"
+    ? "Offline"
+    : "Synkad";
+  return (
+    <div
+      className="text-[11px] text-slate-400 ml-auto flex items-center gap-1.5"
+      title={email ?? "Ej inloggad (endast lokalt)"}
+    >
+      <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+      {label}
     </div>
   );
 }

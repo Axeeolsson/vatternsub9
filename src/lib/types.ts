@@ -80,6 +80,9 @@ export interface LoggedSession {
   notes?: string;
   satisfiesPlannedId?: string; // which planned session this fulfilled
   completedAt: number; // epoch ms
+  // Cloud-sync metadata (optional; backfilled by a Dexie migration).
+  syncId?: string; // stable UUID shared across devices
+  updatedAt?: number; // epoch ms of last local edit (for last-write-wins)
 }
 
 export interface FtpTest {
@@ -89,6 +92,8 @@ export interface FtpTest {
   weightKg?: number;
   source?: "ramp" | "20min" | "8min" | "estimate" | "manual";
   notes?: string;
+  syncId?: string;
+  updatedAt?: number;
 }
 
 // Legacy coarse buckets kept only for migrating old local data (see repository).
@@ -103,4 +108,5 @@ export interface Settings {
   bikeMassKg: number;
   autoAdjust: boolean;
   groupSize: number; // exact number of riders in the group/paceline (1 = solo)
+  updatedAt?: number; // epoch ms of last local edit (for cloud last-write-wins)
 }
