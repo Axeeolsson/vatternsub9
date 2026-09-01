@@ -13,6 +13,7 @@ import {
 } from "./db";
 import { supabase } from "./supabase";
 import type { FtpTest, LoggedSession, Settings } from "../lib/types";
+import planSeed from "../data/plan.seed";
 
 export type SyncStatus = "local" | "offline" | "syncing" | "idle" | "error";
 
@@ -320,6 +321,21 @@ async function syncFtp(userId: string) {
   if (tombs.length) await db.tombstones.bulkDelete(tombs.map((t) => t.syncId));
 }
 
+function isCompleteLegacyProfile(settings: Partial<Settings>): boolean {
+  const positive = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value > 0;
+  return (
+    positive(settings.weightKg) &&
+    positive(settings.currentFtp) &&
+    positive(settings.goalFinishSeconds) &&
+    positive(settings.bikeMassKg) &&
+    positive(settings.groupSize) &&
+    typeof settings.restDaysPerWeek === "number" &&
+    Number.isFinite(settings.restDaysPerWeek) &&
+    settings.restDaysPerWeek >= 0
+  );
+}
+
 async function syncSettings(userId: string) {
   const { data: remote, error } = await supabase
     .from("user_settings")
@@ -330,6 +346,7 @@ async function syncSettings(userId: string) {
   const local = (await db.settings.get("singleton")) ?? undefined;
   const localMs = local?.updatedAt ?? 0;
   const remoteMs = ms(remote?.updated_at);
+  let resolved = local;
 
   // PULL FIRST: adopt a real cloud row instead of letting local defaults win.
   if (remote && remoteMs > localMs) {
@@ -347,11 +364,32 @@ async function syncSettings(userId: string) {
       updatedAt: remoteMs,
     };
     await db.settings.put(patch);
+    resolved = patch;
     if (patch.profileCompleted && patch.planStartDate) {
       await rebuildPersonalizedPlan(patch, db);
     }
+  }
+
+  // Rows created before the onboarding columns existed received
+  // profile_completed=false from the SQL default. If all former settings are
+  // present, this is an existing completed profile—not a new empty account.
+  if (resolved && resolved.profileCompleted !== true && isCompleteLegacyProfile(resolved)) {
+    const upgraded: Settings = {
+      ...resolved,
+      profileCompleted: true,
+      planStartDate: resolved.planStartDate ?? planSeed.startDateISO,
+      autoAdjust: true,
+      updatedAt: Date.now(),
+    };
+    await db.settings.put(upgraded);
+    await rebuildPersonalizedPlan(upgraded, db);
+    const { error: upErr } = await supabase
+      .from("user_settings")
+      .upsert(settingsToRemote(upgraded, userId), { onConflict: "user_id" });
+    if (upErr) throw upErr;
     return;
   }
+
   // Push only if local is STRICTLY newer. Untouched defaults have updatedAt 0
   // and therefore can never overwrite a real cloud settings row.
   if (local && localMs > remoteMs) {
