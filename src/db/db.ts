@@ -48,8 +48,8 @@ class TrainingDB extends Dexie {
   meta!: Table<{ key: string; value: string }, string>;
   tombstones!: Table<Tombstone, string>;
 
-  constructor() {
-    super("vatternrundan-sub9");
+  constructor(name: string) {
+    super(name);
     this.version(1).stores({
       plannedSessions: "id, week, date, dayOfWeek, sessionType",
       loggedSessions: "++id, date, sessionType, satisfiesPlannedId",
@@ -93,7 +93,44 @@ class TrainingDB extends Dexie {
   }
 }
 
-export const db = new TrainingDB();
+export const realDb = new TrainingDB("vatternrundan-sub9");
+
+// Swappable "active" database. Thanks to ESM live bindings, every module that
+// does `import { db }` sees the current value. It points to realDb when authed,
+// and to an ephemeral guest DB in Test mode. Sync ALWAYS uses realDb, so guest
+// data can never be uploaded.
+export let db: TrainingDB = realDb;
+let guestDb: TrainingDB | null = null;
+
+export function isGuestActive(): boolean {
+  return db !== realDb;
+}
+export function useRealDb(): void {
+  db = realDb;
+}
+
+/** Enter Test mode: create a fresh throwaway guest DB and seed it. */
+export async function enterGuestMode(): Promise<void> {
+  if (guestDb) {
+    try { await guestDb.delete(); } catch { /* ignore */ }
+    guestDb = null;
+  }
+  try { await Dexie.delete("vatternrundan-guest"); } catch { /* ignore */ }
+  guestDb = new TrainingDB("vatternrundan-guest");
+  await guestDb.open();
+  db = guestDb;
+  await ensureSeeded();
+}
+
+/** Leave Test mode: switch back to the real DB and delete all guest data. */
+export async function exitGuestMode(): Promise<void> {
+  db = realDb;
+  if (guestDb) {
+    try { await guestDb.delete(); } catch { /* ignore */ }
+    guestDb = null;
+  }
+  try { await Dexie.delete("vatternrundan-guest"); } catch { /* ignore */ }
+}
 
 /** Seed the planned template + defaults on first run. Idempotent. */
 export async function ensureSeeded(): Promise<void> {

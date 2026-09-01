@@ -6,6 +6,7 @@ import type { Settings as SettingsT } from "../lib/types";
 import { fmtHms } from "../lib/format";
 import { draftFactorForRiders } from "../lib/powerModel";
 import { useAuth, useSyncState } from "../hooks/useAuth";
+import { useMode } from "../context/mode";
 
 // Empty string -> undefined (unset); otherwise a finite number.
 function numOrUndef(v: string): number | undefined {
@@ -16,6 +17,7 @@ function numOrUndef(v: string): number | undefined {
 
 export function Settings() {
   const { email } = useAuth();
+  const { isGuest } = useMode();
   const settings = useLiveQuery(() => db.settings.get("singleton"), []);
   const [msg, setMsg] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -52,7 +54,7 @@ export function Settings() {
 
       <AccountSync />
 
-      {!email ? (
+      {!email && !isGuest ? (
         <div className="card p-4 text-sm text-slate-400">
           Logga in för att se och hantera dina inställningar.
         </div>

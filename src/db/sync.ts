@@ -5,7 +5,8 @@
 // last-write-wins strategy keyed by a per-record UUID (`syncId`) and an
 // `updatedAt` timestamp. Deletions propagate via tombstones.
 
-import { db, type Tombstone } from "./db";
+// Sync ALWAYS targets the real (authed) DB, never the ephemeral guest DB.
+import { realDb as db, type Tombstone } from "./db";
 import { supabase } from "./supabase";
 import type { FtpTest, LoggedSession, Settings } from "../lib/types";
 
