@@ -1,12 +1,14 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { Settings } from "../lib/types";
 import { RACE_DATE_ISO } from "../lib/constants";
 import planSeed from "../data/plan.seed";
+import { FtpEstimator } from "./FtpEstimator";
 
 interface Props {
   initial?: Partial<Settings> | null;
   defaultStartDate: string;
   submitLabel?: string;
+  allowFtpEstimate?: boolean;
   onSubmit: (settings: Partial<Settings>) => Promise<void>;
 }
 
@@ -38,6 +40,7 @@ export function InformationForm({
   initial,
   defaultStartDate,
   submitLabel = "Gå vidare",
+  allowFtpEstimate = false,
   onSubmit,
 }: Props) {
   const [values, setValues] = useState<Values>(() =>
@@ -89,10 +92,14 @@ export function InformationForm({
       step?: string;
       min?: string;
       max?: string;
+      action?: ReactNode;
     } = {}
   ) => (
     <div className="min-w-0">
-      <label className="label">{label}</label>
+      <div className="flex flex-wrap items-center justify-between gap-x-2">
+        <label className="label">{label}</label>
+        {options.action}
+      </div>
       <input
         type={options.type ?? "number"}
         inputMode={options.inputMode}
@@ -138,6 +145,18 @@ export function InformationForm({
         {field("weightKg", "Vikt (kg)", { inputMode: "decimal", step: "0.1" })}
         {field("currentFtp", "FTP-utgångsvärde (watt)", {
           inputMode: "numeric",
+          action: allowFtpEstimate ? (
+            <FtpEstimator
+              weightKg={Number(values.weightKg) || undefined}
+              onApply={(ftp, estimatedWeight) =>
+                setValues((current) => ({
+                  ...current,
+                  currentFtp: String(ftp),
+                  ...(estimatedWeight ? { weightKg: String(estimatedWeight) } : {}),
+                }))
+              }
+            />
+          ) : undefined,
         })}
         {field("bikeMassKg", "Cykel + utrustning (kg)", {
           inputMode: "decimal",

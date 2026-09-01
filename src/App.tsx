@@ -156,6 +156,7 @@ export default function App() {
           <InformationForm
             initial={sessionStorage.getItem("vr_new_signup") === "1" || isGuest ? null : profile}
             defaultStartDate=""
+            allowFtpEstimate
             onSubmit={async (values) => {
               await repo.saveSettings(values);
               if (session) await syncNow();
