@@ -50,6 +50,9 @@ export function LogScreen() {
     () => db.loggedSessions.orderBy("date").reverse().toArray(),
     []
   );
+  // Rest is inferred from days without training and is never a log entry.
+  // Ignore any legacy rest rows that may still exist in local/cloud data.
+  const visibleLogged = logged?.filter((session) => session.sessionType !== "rest");
   const state = useEngineState();
   const [addOpen, setAddOpen] = useState(false);
   const [detail, setDetail] = useState<LoggedSession | null>(null);
@@ -85,16 +88,16 @@ export function LogScreen() {
         </button>
       </div>
 
-      {!logged ? (
+      {!visibleLogged ? (
         <div className="text-slate-400">Laddar…</div>
-      ) : logged.length === 0 ? (
+      ) : visibleLogged.length === 0 ? (
         <div className="card p-6 text-center text-slate-400">
           Inga loggade pass ännu. Tryck på “+ Nytt pass” eller checka av dagens pass
           på startsidan.
         </div>
       ) : (
         <div className="space-y-2">
-          {logged.map((l) => {
+          {visibleLogged.map((l) => {
             const m = metaFor(l.sessionType);
             return (
               <button

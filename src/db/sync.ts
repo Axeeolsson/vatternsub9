@@ -6,7 +6,11 @@
 // `updatedAt` timestamp. Deletions propagate via tombstones.
 
 // Sync ALWAYS targets the real (authed) DB, never the ephemeral guest DB.
-import { realDb as db, type Tombstone } from "./db";
+import {
+  realDb as db,
+  rebuildPersonalizedPlan,
+  type Tombstone,
+} from "./db";
 import { supabase } from "./supabase";
 import type { FtpTest, LoggedSession, Settings } from "../lib/types";
 
@@ -123,6 +127,8 @@ function settingsToRemote(s: Settings, userId: string) {
     bike_mass_kg: s.bikeMassKg,
     auto_adjust: s.autoAdjust,
     group_size: s.groupSize,
+    plan_start_date: s.planStartDate ?? null,
+    profile_completed: s.profileCompleted === true,
     updated_at: iso(s.updatedAt),
   };
 }
@@ -334,16 +340,22 @@ async function syncSettings(userId: string) {
       goalFinishSeconds: remote.goal_finish_seconds,
       restDaysPerWeek: remote.rest_days_per_week,
       bikeMassKg: remote.bike_mass_kg,
-      autoAdjust: remote.auto_adjust,
+      autoAdjust: true,
       groupSize: remote.group_size,
+      planStartDate: remote.plan_start_date ?? undefined,
+      profileCompleted: remote.profile_completed === true,
       updatedAt: remoteMs,
     };
     await db.settings.put(patch);
+    if (patch.profileCompleted && patch.planStartDate) {
+      await rebuildPersonalizedPlan(patch, db);
+    }
     return;
   }
   // Push only if local is STRICTLY newer. Untouched defaults have updatedAt 0
   // and therefore can never overwrite a real cloud settings row.
   if (local && localMs > remoteMs) {
+    local.autoAdjust = true;
     const { error: upErr } = await supabase
       .from("user_settings")
       .upsert(settingsToRemote(local, userId), { onConflict: "user_id" });
@@ -403,7 +415,9 @@ export function initSync(): void {
   if (initialized) return;
   initialized = true;
   supabase.auth.onAuthStateChange((_event, session) => {
-    if (session) void syncNow();
+    // A brand-new account must complete Information before any old local
+    // profile can be uploaded. App.tsx resets the real DB and clears this flag.
+    if (session && sessionStorage.getItem("vr_new_signup") !== "1") void syncNow();
     else setState({ status: "local", error: null });
   });
   if (typeof window !== "undefined") {

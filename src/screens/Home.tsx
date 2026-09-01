@@ -85,7 +85,7 @@ export function Home({ onGoProgress }: { onGoProgress: () => void }) {
     return <div className="p-6 text-slate-400">Laddar…</div>;
   }
 
-  const wi = rec.week ? weekInfo(rec.week) : undefined;
+  const wi = rec.week ? weekInfo(rec.week, state.settings) : undefined;
   const session = rec.recommended;
   const m = session ? metaFor(session.sessionType) : metaFor("rest");
   const weekPct = rec.weekTotal ? rec.weekDone / rec.weekTotal : 0;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 import {
   House,
   CalendarDays,
@@ -13,8 +14,21 @@ import { LogScreen } from "./screens/LogScreen";
 import { Progress } from "./screens/Progress";
 import { Settings } from "./screens/Settings";
 import { useAuth, useSyncState } from "./hooks/useAuth";
-import { enterGuestMode, exitGuestMode, useRealDb, isGuestActive } from "./db/db";
+import {
+  db,
+  ensureSeeded,
+  enterGuestMode,
+  exitGuestMode,
+  useRealDb,
+  isGuestActive,
+  realDb,
+  rebuildPersonalizedPlan,
+  resetRealDbForNewAccount,
+} from "./db/db";
 import { ModeContext } from "./context/mode";
+import { InformationForm } from "./components/InformationForm";
+import { repo } from "./db/repository";
+import { syncNow } from "./db/sync";
 
 type Tab = "home" | "schedule" | "log" | "progress" | "settings";
 
@@ -23,7 +37,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "schedule", label: "Schema", icon: CalendarDays },
   { id: "log", label: "Logg", icon: ClipboardList },
   { id: "progress", label: "Nivå", icon: LineChart },
-  { id: "settings", label: "Mer", icon: SettingsIcon },
+  { id: "settings", label: "Inställningar", icon: SettingsIcon },
 ];
 
 const GUEST_KEY = "vr_guest";
@@ -35,12 +49,18 @@ type SignUp = (
 ) => Promise<{ data: { user: unknown; session: unknown }; error: { message: string } | null }>;
 
 export default function App() {
-  const { session, ready, signIn, signUp } = useAuth();
+  const { session, ready, signIn, signUp, signOut } = useAuth();
   const [guest, setGuest] = useState<boolean>(
     () => sessionStorage.getItem(GUEST_KEY) === "1"
   );
   const [busy, setBusy] = useState(true);
+  const [storeEpoch, setStoreEpoch] = useState(0);
+  const [preparedKey, setPreparedKey] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("home");
+  const profile = useLiveQuery(
+    () => db.settings.get("singleton"),
+    [guest, session?.user.id, storeEpoch]
+  );
 
   // Select the active database based on auth + guest state.
   useEffect(() => {
@@ -49,19 +69,41 @@ export default function App() {
     (async () => {
       setBusy(true);
       if (session) {
+        const newSignup = sessionStorage.getItem("vr_new_signup") === "1";
         if (isGuestActive()) await exitGuestMode();
-        else useRealDb();
+        useRealDb();
+        if (newSignup) {
+          await resetRealDbForNewAccount();
+          sessionStorage.removeItem("vr_new_signup");
+        } else {
+          await ensureSeeded();
+          await syncNow();
+          const current = await realDb.settings.get("singleton");
+          if (current?.profileCompleted && current.planStartDate) {
+            await rebuildPersonalizedPlan(current, realDb);
+          }
+        }
         sessionStorage.removeItem(GUEST_KEY);
         if (!cancelled) {
           setGuest(false);
+          setStoreEpoch((value) => value + 1);
+          setPreparedKey(`auth:${session.user.id}`);
           setBusy(false);
         }
       } else if (guest) {
         await enterGuestMode();
-        if (!cancelled) setBusy(false);
+        if (!cancelled) {
+          setStoreEpoch((value) => value + 1);
+          setPreparedKey("guest");
+          setBusy(false);
+        }
       } else {
         useRealDb();
-        if (!cancelled) setBusy(false);
+        if (!cancelled) {
+          setStoreEpoch((value) => value + 1);
+          setPreparedKey("landing");
+          setBusy(false);
+        }
       }
     })();
     return () => {
@@ -69,10 +111,21 @@ export default function App() {
     };
   }, [ready, session, guest]);
 
-  const mode: "loading" | "landing" | "authed" | "guest" =
-    !ready || busy ? "loading" : session ? "authed" : guest ? "guest" : "landing";
+  const desiredKey = session ? `auth:${session.user.id}` : guest ? "guest" : "landing";
+  const profileLoading = (session || guest) && profile === undefined;
+  const mode: "loading" | "landing" | "information" | "authed" | "guest" =
+    !ready || busy || preparedKey !== desiredKey || profileLoading
+      ? "loading"
+      : !session && !guest
+      ? "landing"
+      : profile?.profileCompleted !== true
+      ? "information"
+      : session
+      ? "authed"
+      : "guest";
 
   function startGuest() {
+    setBusy(true);
     sessionStorage.setItem(GUEST_KEY, "1");
     setGuest(true);
   }
@@ -92,6 +145,35 @@ export default function App() {
 
   if (mode === "landing") {
     return <Landing signIn={signIn} signUp={signUp} onGuest={startGuest} />;
+  }
+
+  if (mode === "information") {
+    const isGuest = !session;
+    return (
+      <div className="min-h-full flex flex-col justify-center max-w-md mx-auto p-4 safe-top safe-bottom">
+        <div className="card p-5">
+          <h1 className="text-2xl font-bold text-white mb-4">Information</h1>
+          <InformationForm
+            initial={sessionStorage.getItem("vr_new_signup") === "1" || isGuest ? null : profile}
+            defaultStartDate=""
+            onSubmit={async (values) => {
+              await repo.saveSettings(values);
+              if (session) await syncNow();
+              setStoreEpoch((value) => value + 1);
+            }}
+          />
+          <button
+            className="btn-ghost w-full mt-2"
+            onClick={async () => {
+              if (isGuest) await exitGuest();
+              else await signOut();
+            }}
+          >
+            Avbryt
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (

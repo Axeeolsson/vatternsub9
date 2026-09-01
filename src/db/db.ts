@@ -7,6 +7,7 @@ import type {
 } from "../lib/types";
 import planSeed from "../data/plan.seed";
 import { FALLBACKS } from "../lib/settings";
+import { buildPersonalizedPlan } from "../lib/personalizedPlan";
 
 // A planned session stored in the DB: the seed fields plus a "satisfied" flag
 // the engine can toggle when a matching session is logged.
@@ -27,6 +28,7 @@ export interface Tombstone {
 export const DEFAULT_SETTINGS: Settings = {
   id: "singleton",
   autoAdjust: true,
+  profileCompleted: false,
 };
 
 export function newUuid(): string {
@@ -40,7 +42,7 @@ export function newUuid(): string {
   });
 }
 
-class TrainingDB extends Dexie {
+export class TrainingDB extends Dexie {
   plannedSessions!: Table<StoredPlannedSession, string>;
   loggedSessions!: Table<LoggedSession, number>;
   ftpTests!: Table<FtpTest, number>;
@@ -90,6 +92,25 @@ class TrainingDB extends Dexie {
             if (!r.updatedAt) r.updatedAt = now;
           });
       });
+    // v3: explicit onboarding status + personalized plan start date.
+    this.version(3)
+      .stores({
+        plannedSessions: "id, week, date, dayOfWeek, sessionType",
+        loggedSessions: "++id, date, sessionType, satisfiesPlannedId, syncId",
+        ftpTests: "++id, date, syncId",
+        settings: "id",
+        meta: "key",
+        tombstones: "syncId, table",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("settings")
+          .toCollection()
+          .modify((r: Settings) => {
+            r.autoAdjust = true;
+            if (r.profileCompleted !== true) r.profileCompleted = false;
+          });
+      });
   }
 }
 
@@ -107,6 +128,30 @@ export function isGuestActive(): boolean {
 }
 export function useRealDb(): void {
   db = realDb;
+}
+
+/** Replace only the generated plan; logged sessions are never touched. */
+export async function rebuildPersonalizedPlan(
+  settings: Partial<Settings>,
+  target: TrainingDB = db
+): Promise<void> {
+  if (!settings.planStartDate) return;
+  const marker = await target.meta.get("personalizedPlanStart");
+  const count = await target.plannedSessions.count();
+  if (marker?.value === settings.planStartDate && count > 0) return;
+
+  const plan = buildPersonalizedPlan(settings.planStartDate);
+  const rows: StoredPlannedSession[] = plan.weeks.flatMap((week) =>
+    week.sessions.map((session) => ({ ...session }))
+  );
+  await target.transaction("rw", target.plannedSessions, target.meta, async () => {
+    await target.plannedSessions.clear();
+    if (rows.length) await target.plannedSessions.bulkPut(rows);
+    await target.meta.put({
+      key: "personalizedPlanStart",
+      value: settings.planStartDate as string,
+    });
+  });
 }
 
 /** Enter Test mode: create a fresh throwaway guest DB and seed it. */
@@ -130,6 +175,14 @@ export async function exitGuestMode(): Promise<void> {
     guestDb = null;
   }
   try { await Dexie.delete("vatternrundan-guest"); } catch { /* ignore */ }
+}
+
+/** Start a newly-created cloud account with a genuinely empty local profile. */
+export async function resetRealDbForNewAccount(): Promise<void> {
+  useRealDb();
+  await realDb.delete();
+  await realDb.open();
+  await ensureSeeded();
 }
 
 /** Seed the planned template + defaults on first run. Idempotent. */

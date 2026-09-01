@@ -3,10 +3,10 @@ import {
   DEFAULT_SETTINGS,
   ensureSeeded,
   newUuid,
+  rebuildPersonalizedPlan,
   type StoredPlannedSession,
 } from "./db";
 import type { FtpTest, LoggedSession, Settings } from "../lib/types";
-import planSeed from "../data/plan.seed";
 import { notifyLocalChange, recordTombstone } from "./sync";
 
 // Migrate legacy string buckets (from an earlier version) into a rider count.
@@ -39,7 +39,17 @@ export const repo = {
   },
   async saveSettings(patch: Partial<Settings>): Promise<void> {
     const cur = await repo.getSettings();
-    await db.settings.put({ ...cur, ...patch, id: "singleton", updatedAt: Date.now() });
+    const next: Settings = {
+      ...cur,
+      ...patch,
+      id: "singleton",
+      autoAdjust: true,
+      updatedAt: Date.now(),
+    };
+    await db.settings.put(next);
+    if (next.profileCompleted && next.planStartDate) {
+      await rebuildPersonalizedPlan(next);
+    }
     notifyLocalChange();
   },
 
@@ -49,7 +59,7 @@ export const repo = {
   },
   async plannedForWeek(week: number): Promise<StoredPlannedSession[]> {
     const rows = await db.plannedSessions.where("week").equals(week).toArray();
-    return rows.sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+    return rows.sort((a, b) => a.date.localeCompare(b.date));
   },
   async updatePlanned(
     id: string,
@@ -121,83 +131,6 @@ export const repo = {
     notifyLocalChange();
   },
 
-  // ---- backup ----
-  async exportJson(): Promise<string> {
-    const [settings, logged, ftp, planned] = await Promise.all([
-      repo.getSettings(),
-      repo.allLogged(),
-      repo.allFtp(),
-      repo.allPlanned(),
-    ]);
-    return JSON.stringify(
-      {
-        app: "vatternrundan-sub9",
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        settings,
-        loggedSessions: logged,
-        ftpTests: ftp,
-        // only store planned sessions the user has overridden to keep it small
-        plannedOverrides: planned.filter((p) => p.overridden),
-      },
-      null,
-      2
-    );
-  },
-
-  async importJson(text: string): Promise<void> {
-    const data = JSON.parse(text);
-    await db.transaction(
-      "rw",
-      db.settings,
-      db.loggedSessions,
-      db.ftpTests,
-      db.plannedSessions,
-      async () => {
-        if (data.settings)
-          await db.settings.put({
-            ...data.settings,
-            id: "singleton",
-            updatedAt: Date.now(),
-          });
-        if (Array.isArray(data.loggedSessions)) {
-          await db.loggedSessions.clear();
-          for (const s of data.loggedSessions) {
-            const { id: _drop, ...rest } = s;
-            await db.loggedSessions.add({
-              ...rest,
-              syncId: rest.syncId ?? newUuid(),
-              updatedAt: Date.now(),
-            });
-          }
-        }
-        if (Array.isArray(data.ftpTests)) {
-          await db.ftpTests.clear();
-          for (const t of data.ftpTests) {
-            const { id: _drop, ...rest } = t;
-            await db.ftpTests.add({
-              ...rest,
-              syncId: rest.syncId ?? newUuid(),
-              updatedAt: Date.now(),
-            });
-          }
-        }
-        if (Array.isArray(data.plannedOverrides)) {
-          for (const p of data.plannedOverrides) await db.plannedSessions.put(p);
-        }
-      }
-    );
-    notifyLocalChange();
-  },
-
-  /** Wipe all user data and re-seed the template from scratch. */
-  async resetAll(): Promise<void> {
-    await db.delete();
-    await db.open();
-    await ensureSeeded();
-  },
-
-  seed: planSeed,
 };
 
 export type Repo = typeof repo;

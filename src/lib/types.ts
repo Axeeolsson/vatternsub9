@@ -109,7 +109,11 @@ export interface Settings {
   goalFinishSeconds?: number; // sub-9h => 9*3600
   restDaysPerWeek?: number;
   bikeMassKg?: number;
+  // Kept for backwards compatibility with older synced settings. The engine
+  // always enables adaptation now; there is no user-facing off switch.
   autoAdjust: boolean;
   groupSize?: number; // exact number of riders in the group/paceline (1 = solo)
+  planStartDate?: string; // ISO date; personalized plan week 1 begins here
+  profileCompleted?: boolean; // explicit onboarding gate, never inferred from defaults
   updatedAt?: number; // epoch ms of last local edit (for cloud last-write-wins)
 }

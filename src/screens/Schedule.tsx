@@ -1,6 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useEngineState } from "../hooks/useData";
-import planSeed from "../data/plan.seed";
 import {
   reconcileWeek,
   weekOfDate,
@@ -16,6 +15,7 @@ import { SessionIcon, LoggedIcon } from "../components/icons";
 import { LogSessionForm } from "../components/LogSessionForm";
 import type { StoredPlannedSession } from "../db/db";
 import type { LoggedSession } from "../lib/types";
+import { personalizedPlanForSettings } from "../lib/personalizedPlan";
 
 function loggedTitle(l: LoggedSession): string {
   if (l.title) return l.title;
@@ -36,9 +36,14 @@ function loggedSummary(l: LoggedSession): string {
 export function Schedule() {
   const state = useEngineState();
   const today = todayISO();
-  const currentWeek = weekOfDate(today) || 1;
-  const [week, setWeek] = useState<number>(currentWeek < 1 ? 1 : currentWeek);
+  const plan = personalizedPlanForSettings(state?.settings);
+  const currentWeek = weekOfDate(today, state?.settings) || 1;
+  const [week, setWeek] = useState<number>(1);
   const [sel, setSel] = useState<StoredPlannedSession | null>(null);
+
+  useEffect(() => {
+    setWeek(currentWeek < 1 ? 1 : currentWeek);
+  }, [currentWeek]);
 
   const rec = useMemo(
     () => (state ? reconcileWeek(state, week) : undefined),
@@ -48,7 +53,7 @@ export function Schedule() {
     () => (state ? weeklyAdaptation(state, today) : undefined),
     [state, today]
   );
-  const wi = planSeed.weeks.find((w) => w.week === week);
+  const wi = plan.weeks.find((w) => w.week === week);
 
   if (!state || !rec || !wi) return <div className="p-6 text-slate-400">Laddar…</div>;
 
@@ -68,7 +73,7 @@ export function Schedule() {
           value={week}
           onChange={(e) => setWeek(Number(e.target.value))}
         >
-          {planSeed.weeks.map((w) => (
+          {plan.weeks.map((w) => (
             <option key={w.week} value={w.week}>
               Vecka {w.week} · {w.phaseShort}
             </option>
@@ -76,8 +81,8 @@ export function Schedule() {
         </select>
         <button
           className="btn-ghost px-3 py-2"
-          onClick={() => setWeek((w) => Math.min(planSeed.weeks.length, w + 1))}
-          disabled={week >= planSeed.weeks.length}
+          onClick={() => setWeek((w) => Math.min(plan.weeks.length, w + 1))}
+          disabled={week >= plan.weeks.length}
         >
           ›
         </button>
@@ -116,24 +121,33 @@ export function Schedule() {
           const isToday = s.date === today;
           const dayLogs = loggedOnDate(rec.loggedThisWeek, s.date);
 
-          // Distinct per-day status.
-          const status: "klar" | "ersatt" | "idag" | "missad" | "kvar" = done
-            ? "klar"
-            : dayLogs.length > 0
-            ? "ersatt" // logged a different/substitute session
-            : isToday
-            ? "idag"
-            : s.date < today
-            ? "missad"
-            : "kvar";
+          // Rest is inferred, never completed or missed. It only gets a status
+          // when an actual activity was logged on that date.
+          const status: "klar" | "ersatt" | "idag" | "missad" | "kvar" | "none" =
+            s.sessionType === "rest"
+              ? dayLogs.length > 0
+                ? "ersatt"
+                : "none"
+              : done
+              ? "klar"
+              : dayLogs.length > 0
+              ? "ersatt"
+              : isToday
+              ? "idag"
+              : s.date < today
+              ? "missad"
+              : "kvar";
 
-          const badge = {
-            klar: ["bg-emerald-500/20 text-emerald-300", "✓ Klar"],
-            ersatt: ["bg-indigo-500/20 text-indigo-300", "Ersatt"],
-            idag: ["bg-brand/20 text-brand", "Idag"],
-            missad: ["bg-red-500/20 text-red-300", "Missad"],
-            kvar: ["bg-white/5 text-slate-400", "Kvar"],
-          }[status];
+          const badge =
+            status === "none"
+              ? null
+              : {
+                  klar: ["bg-emerald-500/20 text-emerald-300", "✓ Klar"],
+                  ersatt: ["bg-indigo-500/20 text-indigo-300", "Ersatt"],
+                  idag: ["bg-brand/20 text-brand", "Idag"],
+                  missad: ["bg-red-500/20 text-red-300", "Missad"],
+                  kvar: ["bg-white/5 text-slate-400", "Kvar"],
+                }[status];
 
           const doneLabel =
             status === "ersatt" ? "Ersatt med:" : status === "klar" ? "Gjort:" : "";
@@ -177,7 +191,7 @@ export function Schedule() {
                   </div>
                 </div>
                 <div className="shrink-0">
-                  <span className={`chip ${badge[0]}`}>{badge[1]}</span>
+                  {badge && <span className={`chip ${badge[0]}`}>{badge[1]}</span>}
                 </div>
               </div>
 
@@ -211,7 +225,11 @@ export function Schedule() {
         {sel && (
           <div className="space-y-4">
             <div className="card p-3 text-sm text-slate-300">{sel.detail}</div>
-            <LogSessionForm date={sel.date} planned={sel} onSaved={() => setSel(null)} />
+            <LogSessionForm
+              date={sel.date}
+              planned={sel.sessionType === "rest" ? undefined : sel}
+              onSaved={() => setSel(null)}
+            />
           </div>
         )}
       </Sheet>

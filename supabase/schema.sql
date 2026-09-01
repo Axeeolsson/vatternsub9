@@ -105,6 +105,8 @@ create table if not exists public.user_settings (
   bike_mass_kg numeric,
   auto_adjust boolean,
   group_size numeric,
+  plan_start_date date,
+  profile_completed boolean not null default false,
   updated_at timestamptz not null default now()
 );
 drop trigger if exists user_settings_set_updated_at on public.user_settings;

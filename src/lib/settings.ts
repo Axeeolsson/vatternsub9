@@ -1,4 +1,5 @@
 import type { Settings } from "./types";
+import planSeed from "../data/plan.seed";
 
 // Internal fallbacks used ONLY for computation when a profile value is unset.
 // The stored Settings may leave these empty (a fresh account shows blank inputs
@@ -12,6 +13,7 @@ export const FALLBACKS = {
   restDaysPerWeek: 1,
   groupSize: 8,
   autoAdjust: true,
+  planStartDate: planSeed.startDateISO,
 } as const;
 
 export interface EffectiveSettings {
@@ -22,6 +24,7 @@ export interface EffectiveSettings {
   restDaysPerWeek: number;
   groupSize: number;
   autoAdjust: boolean;
+  planStartDate: string;
 }
 
 function posOr(v: unknown, fb: number): number {
@@ -40,12 +43,17 @@ export function effectiveSettings(s?: Partial<Settings> | null): EffectiveSettin
     goalFinishSeconds: posOr(s?.goalFinishSeconds, FALLBACKS.goalFinishSeconds),
     restDaysPerWeek: nonNegOr(s?.restDaysPerWeek, FALLBACKS.restDaysPerWeek),
     groupSize: posOr(s?.groupSize, FALLBACKS.groupSize),
-    autoAdjust: s?.autoAdjust ?? FALLBACKS.autoAdjust,
+    // Adaptation is mandatory: FTP, durability, RPE, completion and progressive
+    // overload always shape the live plan.
+    autoAdjust: true,
+    planStartDate:
+      typeof s?.planStartDate === "string" && s.planStartDate
+        ? s.planStartDate
+        : FALLBACKS.planStartDate,
   };
 }
 
 /** True when the core profile inputs a user should fill are still unset. */
 export function profileIncomplete(s?: Partial<Settings> | null): boolean {
-  const posSet = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v > 0;
-  return !posSet(s?.weightKg) || !posSet(s?.currentFtp);
+  return s?.profileCompleted !== true;
 }

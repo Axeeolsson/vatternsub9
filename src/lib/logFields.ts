@@ -47,7 +47,7 @@ export interface FieldDef {
 }
 
 export const FIELD_DEFS: Record<FieldKey, FieldDef> = {
-  durationMin: { key: "durationMin", label: "Tid", unit: "min", kind: "number", inputMode: "numeric", column: true, placeholder: "t.ex. 90" },
+  durationMin: { key: "durationMin", label: "Tid", unit: "min", kind: "number", inputMode: "numeric", column: true },
   distanceKm: { key: "distanceKm", label: "Distans", unit: "km", kind: "number", inputMode: "decimal", column: true },
   distanceM: { key: "distanceM", label: "Distans", unit: "m", kind: "number", inputMode: "numeric" },
   avgSpeedKmh: { key: "avgSpeedKmh", label: "Snittfart", unit: "km/h", kind: "number", inputMode: "decimal", column: true },

@@ -30,7 +30,12 @@ export function useAuth() {
   }, []);
 
   async function signUp(email: string, password: string) {
-    return supabase.auth.signUp({ email, password });
+    sessionStorage.setItem("vr_new_signup", "1");
+    const result = await supabase.auth.signUp({ email, password });
+    if (result.error || !result.data.session) {
+      sessionStorage.removeItem("vr_new_signup");
+    }
+    return result;
   }
   async function signIn(email: string, password: string) {
     return supabase.auth.signInWithPassword({ email, password });

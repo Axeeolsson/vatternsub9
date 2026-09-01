@@ -56,7 +56,7 @@ export function Progress() {
 
       {needsProfile && (
         <div className="card p-3 border border-sky-500/30 bg-sky-500/5 text-xs text-sky-200/90">
-          Ange din <b>vikt</b> och <b>FTP</b> under <b>Mer</b> för en korrekt beräkning.
+          Ange din <b>vikt</b> och <b>FTP</b> under <b>Inställningar</b> för en korrekt beräkning.
         </div>
       )}
 
@@ -84,7 +84,7 @@ export function Progress() {
             {Math.round(level.sustainableIF * 100)}% av FTP ({Math.round(level.ftp * level.sustainableIF)} W)
             – den andelen stiger med dina långpass. I klunga (draftning ~30% mindre
             luftmotstånd) ger det ~{level.avgSpeedKmh.toFixed(1)} km/h. Ändra
-            vikt/antaganden under “Mer”.
+            vikt och antaganden under “Inställningar”.
           </p>
         </details>
         <div className="mt-3 h-2 rounded-full bg-ink-800 overflow-hidden">
@@ -224,7 +224,7 @@ export function Progress() {
         <div className="text-sm font-semibold mb-1">Nivåmodell (auto-FTP)</div>
         <p className="text-xs text-slate-400 leading-relaxed">
           FTP uppdateras automatiskt utifrån forskning. Bara <b>uthålliga</b>{" "}
-          nära-maxinsatser (≥8 min, t.ex. 2×20 eller ett 20-min-test) höjer den – korta
+          nära-maxinsatser (minst 8 min, exempelvis tröskelblock eller FTP-test) höjer den – korta
           VO2-stötar mäter annat. Efter ett riktigt test tillåts bara realistisk ökning
           (~2–5% per block). Lugn volym <b>bygger</b> den långsamt (max ~4%), och FTP{" "}
           <b>sjunker</b> ~1,5%/vecka om du slutar träna. Allt är dämpat så inget enskilt
@@ -390,7 +390,6 @@ function FtpSheet({
               type="number"
               inputMode="numeric"
               className="input"
-              placeholder="t.ex. 245"
               value={ftp}
               onChange={(e) => setFtp(e.target.value)}
             />

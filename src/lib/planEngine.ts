@@ -11,7 +11,6 @@ import type {
   Settings,
 } from "./types";
 import type { StoredPlannedSession } from "../db/db";
-import planSeed from "../data/plan.seed";
 import {
   estimateRace,
   requiredFtp,
@@ -24,6 +23,7 @@ import { modelFtp, MIN_FTP_EFFORT_MIN } from "./ftpModel";
 import { computeDurability } from "./durability";
 import { transferFactorForSession } from "./logFields";
 import { effectiveSettings } from "./settings";
+import { personalizedPlanForSettings } from "./personalizedPlan";
 
 export interface EngineState {
   planned: StoredPlannedSession[];
@@ -106,17 +106,22 @@ export function loggedOnDate(
   return logged.filter((l) => l.date === dateISO && l.sessionType !== "rest");
 }
 
-export function weekOfDate(dateISO: string): number | null {
-  for (const w of planSeed.weeks) {
-    const end = addDays(w.startDateISO, 6);
-    if (dateISO >= w.startDateISO && dateISO <= end) return w.week;
+export function weekOfDate(
+  dateISO: string,
+  settings?: Partial<Settings> | null
+): number | null {
+  const plan = personalizedPlanForSettings(settings);
+  for (const week of plan.weeks) {
+    const next = plan.weeks.find((candidate) => candidate.week === week.week + 1);
+    const calendarEnd = next ? addDays(next.startDateISO, -1) : plan.raceDateISO;
+    if (dateISO >= week.startDateISO && dateISO <= calendarEnd) return week.week;
   }
-  if (dateISO < planSeed.weeks[0].startDateISO) return 0; // before plan starts
+  if (dateISO < plan.startDateISO) return 0;
   return null; // after plan / race
 }
 
-export function weekInfo(week: number) {
-  return planSeed.weeks.find((w) => w.week === week);
+export function weekInfo(week: number, settings?: Partial<Settings> | null) {
+  return personalizedPlanForSettings(settings).weeks.find((w) => w.week === week);
 }
 
 // ---- Reconciliation ---------------------------------------------------------
@@ -141,9 +146,12 @@ export function reconcileWeek(
   const planned = state.planned
     .filter((p) => p.week === week)
     .sort((a, b) => a.dayOfWeek - b.dayOfWeek);
-  const wi = weekInfo(week);
+  const wi = weekInfo(week, state.settings);
   const weekStart = wi?.startDateISO ?? planned[0]?.date;
-  const weekEnd = weekStart ? addDays(weekStart, 6) : "9999-12-31";
+  const nextWeek = weekInfo(week + 1, state.settings);
+  const weekEnd = nextWeek
+    ? addDays(nextWeek.startDateISO, -1)
+    : personalizedPlanForSettings(state.settings).raceDateISO;
 
   const loggedThisWeek = state.logged
     .filter((l) => l.date >= (weekStart ?? "") && l.date <= weekEnd)
@@ -308,8 +316,8 @@ export function computeProgression(
   asOfISO: string,
   ratio: number
 ): Progression {
-  const week = weekOfDate(asOfISO);
-  const wi = week ? weekInfo(week) : undefined;
+  const week = weekOfDate(asOfISO, state.settings);
+  const wi = week ? weekInfo(week, state.settings) : undefined;
   const phase = (wi?.phase ?? "").toLowerCase();
   const isTaperOrRace =
     phase.includes("nedtrappning") ||
@@ -769,7 +777,7 @@ export function weeklyAdaptation(
   state: EngineState,
   asOfISO: string = todayISO()
 ): WeeklyAdaptation | undefined {
-  const week = weekOfDate(asOfISO);
+  const week = weekOfDate(asOfISO, state.settings);
   if (!week || week <= 1) return undefined; // no in-plan previous week
   const prevWeek = week - 1;
   const prevRec = reconcileWeek(state, prevWeek);
@@ -815,7 +823,7 @@ export function recommendForDate(
   state: EngineState,
   todayISO: string
 ): Recommendation {
-  const week = weekOfDate(todayISO);
+  const week = weekOfDate(todayISO, state.settings);
   const loggedToday = state.logged.filter((l) => l.date === todayISO);
   const level = assessLevel(state);
   const ftp = level.ftp;
@@ -837,7 +845,7 @@ export function recommendForDate(
   if (week === 0)
     return base({
       status: "before_plan",
-      reason: "Planen startar 24 aug 2026. Kör lugnt och håll igång tills dess.",
+      reason: `Planen startar ${effectiveSettings(state.settings).planStartDate}.`,
       isRest: true,
     });
   if (week === null)
@@ -1077,18 +1085,19 @@ export function planProgress(
   // count logged non-rest that map to a planned week/type
   let done = 0;
   const byWeek = new Map<number, WeekReconciliation>();
-  for (const w of planSeed.weeks) {
+  const personalized = personalizedPlanForSettings(state.settings);
+  for (const w of personalized.weeks) {
     const r = reconcileWeek(state, w.week);
     byWeek.set(w.week, r);
     const wt = r.planned.filter((p) => p.sessionType !== "rest").length;
     done += wt - r.remainingTraining.length;
   }
-  const week = weekOfDate(todayISO);
-  const wi = week ? weekInfo(week) : undefined;
+  const week = weekOfDate(todayISO, state.settings);
+  const wi = week ? weekInfo(week, state.settings) : undefined;
   return {
     totalSessions: total,
     doneSessions: done,
-    totalWeeks: planSeed.weeks.length,
+    totalWeeks: personalized.weeks.length,
     currentWeek: week,
     phase: wi?.phaseShort,
     weekType: wi?.weekType,
